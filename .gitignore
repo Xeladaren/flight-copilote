@@ -1,0 +1,8 @@
+/venv/
+/build/
+__pycache__/
+*.egg-info/
+
+*.whl
+
+config.json

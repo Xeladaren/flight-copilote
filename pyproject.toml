@@ -1,0 +1,30 @@
+
+[build-system]
+requires = [
+    "setuptools>=39.2.0",
+    "setuptools_scm[toml]",
+    "setuptools-git-versioning",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+
+name = "discord-copilote"
+dynamic = ["version"]
+authors = [
+  { name="Xeladaren", email="xeladaren@pm.me" },
+]
+description = "Bot to get flight information on Discord."
+readme = "README.md"
+
+requires-python = ">=3.12"
+
+dependencies = [
+  "discord"
+]
+
+[project.scripts]
+discord-copilote = "discord_copilote:main"
+
+[tool.setuptools-git-versioning]
+enabled = true
