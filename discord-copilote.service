@@ -1,0 +1,14 @@
+[Unit]
+Description=Discord Copilote bot
+After=network.target
+
+[Service]
+ExecStart=/opt/discord-copilote_venv/bin/discord-copilote --config /etc/discord-copilote/config.json
+Type=simple
+User=discord-copilote
+Restart=always
+
+
+[Install]
+WantedBy=default.target
+RequiredBy=network.target
