@@ -1,5 +1,6 @@
 
 import discord
+import argparse
 
 from .metar import metar_get
 
@@ -17,57 +18,43 @@ class DiscordCopilote(discord.Client):
 
     async def on_ready(self):
         print(f'Connecté en tant que {self.user}')
-
-    async def run_cmd(self, channel: discord.channel.TextChannel | discord.channel.VoiceChannel, command: str, args: list):
-        if command == "INFO" and self.airport_db:
-            await self.cmd_info(channel, args)
-        elif command == "METAR":
-            await self.cmd_metar(channel, args)
-        elif command == "HELP":
-            await self.cmd_help(channel, args)
         
-    
-    async def cmd_info(self, channel: discord.channel.TextChannel | discord.channel.VoiceChannel, args: list):
-        if len(args) < 1:
-            if channel:
-                await channel.send("Veuillez fournir un code d'aéroport après 'airport'.")
+    async def cmd_info(self, args):
+        # print(f"cmd_info called with args: {args}")
+
+        if len(args.icao_codes) < 1:
+            if args.channel:
+                await args.channel.send("Veuillez fournir au moins un code ICAO d'aéroport.")
             return
-        for arg in args:
-            airport_code = arg.upper()
+        for icao_code in args.icao_codes:
+            icao_code = icao_code.upper()
             try:
-                airport = self.airport_db.get_airport(airport_code)
+                airport = self.airport_db.get_airport(icao_code)
                 # print(airport)
             except Exception as e:
-                if channel:
-                    await channel.send(f"Aéroport {airport_code} Non trouvé. Erreur: {str(e)}")
+                if args.channel:
+                    await args.channel.send(f"Aéroport {icao_code} Non trouvé. Erreur: {str(e)}")
             else:
-                if channel:
-                    await channel.send(airport.to_markdown())
+                if args.channel:
+                    await args.channel.send(airport.to_markdown())
 
-    async def cmd_metar(self, channel: discord.channel.TextChannel | discord.channel.VoiceChannel, args: list):
-        if len(args) < 1:
-            if channel:
-                await channel.send("Veuillez fournir un code d'aéroport après 'metar'.")
+    async def cmd_metar(self, args):
+        # print(f"cmd_metar called with args: {args}")
+
+        if len(args.icao_codes) < 1:
+            if args.channel:
+                await args.channel.send("Veuillez fournir au moins un code ICAO d'aéroport.")
             return
-        for arg in args:
-            icao_code = arg.upper()
+        for icao_code in args.icao_codes:
+            icao_code = icao_code.upper()
             try:
                 metar_data = metar_get(icao_code)
             except Exception as e:
-                if channel:
-                    await channel.send(f"Pas de donnée METAR pour {icao_code}")
+                if args.channel:
+                    await args.channel.send(f"Pas de donnée METAR pour {icao_code}")
             else:
-                if channel:
-                    await channel.send(f"```\n{metar_data}\n```")
-
-    async def cmd_help(self, channel: discord.channel.TextChannel | discord.channel.VoiceChannel, args: list):
-        help_text = (
-            "Commandes disponibles:\n"
-            "- `info <ICAO_CODE> [<ICAO_CODE>] ...`: Obtenir des informations sur une liste aéroport (ex: info LFPG).\n"
-            "- `help`: Afficher ce message d'aide.\n"
-        )
-        if channel:
-            await channel.send(help_text)
+                if args.channel:
+                    await args.channel.send(f"```\n{metar_data}\n```")
 
     async def on_message(self, message):
         
@@ -80,8 +67,42 @@ class DiscordCopilote(discord.Client):
 
         if self.user in message.mentions:
             message_str = message.content.replace(f'<@{self.user.id}>', '').strip()
-            message_split = message_str.split()
-            if len(message_split) > 0:
-                command = message_split[0].upper()
-                args = message_split[1:] if len(message_split) > 1 else []
-                await self.run_cmd(message.channel, command, args)
+
+            parser = argparse.ArgumentParser(prog=f"<@{self.user.id}>", add_help=False)
+            parser.add_argument("--help", "-h", action="store_true", help="Show this help message and exit")
+
+            subparsers = parser.add_subparsers(dest='command')
+            parser_info  = subparsers.add_parser('info',  add_help=False, help='Get airport information')
+            parser_info.add_argument('icao_codes', nargs='*', help='List of ICAO airport codes')
+            parser_info.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
+            parser_info.set_defaults(channel=message.channel, func=self.cmd_info, parser=parser_info)
+
+            parser_metar = subparsers.add_parser('metar', add_help=False, help='Get METAR information')
+            parser_metar.add_argument('icao_codes', nargs='*', help='List of ICAO airport codes')
+            parser_metar.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
+            parser_metar.set_defaults(channel=message.channel, func=self.cmd_metar, parser=parser_metar)
+
+            args = parser.parse_args(message_str.split())
+
+            if args.help and args.command and hasattr(args, 'parser'):
+
+                help_text = args.parser.format_help()
+                if message.channel:
+                    await message.channel.send(help_text)
+                else:
+                    print(help_text)
+
+            elif args.command is None:
+                help_text = parser.format_help()
+                if message.channel:
+                    await message.channel.send(help_text)
+                else:
+                    print(help_text)
+
+            elif not hasattr(args, 'parser'):
+                print("No parser found for the command.")
+
+            if hasattr(args, 'func'):
+                await args.func(args)
+                return
+
