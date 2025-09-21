@@ -139,8 +139,15 @@ class AirportDBAirport:
     def __init__(self, data: dict):
         self.data = data
 
-        self.runways = [AirportDBRunway(rw) for rw in data.get('runways', [])]
-        self.freqs = [AirportDBFrequency(fr) for fr in data.get('freqs', [])]
+        rw_data = data.get('runways', [])
+        if rw_data == None:
+            rw_data = []
+        self.runways = [AirportDBRunway(rw) for rw in rw_data]
+        
+        freqs_data = data.get('freqs', [])
+        if freqs_data == None:
+            freqs_data = []
+        self.freqs = [AirportDBFrequency(fr) for fr in freqs_data]
 
     def __str__(self):
         return json.dumps(self.data, indent=4)
@@ -200,7 +207,7 @@ class AirportDBAirport:
             print(f"Error fetching METAR data for {station_icao}: {str(e)}")
             return None
     
-    def to_markdown(self) -> str:
+    def to_markdown(self, meteo_france=None) -> str:
         md = f"# {self.data.get('name', 'Unknown Airport')} ({self.icao_code()})\n"
 
         md += f"- **Country**: {self.country()}\n"
@@ -225,7 +232,25 @@ class AirportDBAirport:
             md += "## METAR:\n"
             if self.station_distance() > 0:
                 md += f"*Donnée METAR de la station {self.station_icao()} à {self.station_distance():.1f} nm*\n"
-            md += f"```\n{metar_data}\n```\n"
+                md += f"```\n{metar_data}\n```\n"
+
+                if meteo_france:
+                    try:
+                        station, distance = meteo_france.get_closest_station(self.position()[0], self.position()[1])
+                        observation = meteo_france.get_observation_6m(station)
+                        if distance < 2:
+                            md += f"*Données Meteo France de la station à proximité*\n"
+                            metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
+                        else:
+                            md += f"*Données Meteo France de la station {station.name} à {distance/1.852:.1f} nm*\n"
+                            metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
+                        md += f"```\n{metar_data}\n```\n"
+
+                    except Exception as e:
+                        print(f"Fail to get Meteo France Station Info : {str(e)}")
+
+            else:
+                md += f"```\n{metar_data}\n```\n"
         return md
 
 class AirportDB:
