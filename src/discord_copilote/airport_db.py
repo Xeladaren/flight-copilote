@@ -4,6 +4,7 @@ import json
 import urllib.parse
 
 from .metar import metar_get
+from .utils import GeoPos
 
 class AirportDBRunway:
     def __init__(self, data: dict):
@@ -149,6 +150,12 @@ class AirportDBAirport:
             freqs_data = []
         self.freqs = [AirportDBFrequency(fr) for fr in freqs_data]
 
+        lat = float(self.data.get('latitude_deg', 0))
+        lon = float(self.data.get('longitude_deg', 0))
+        alt = float(self.data.get('elevation_ft', 0)) * 0.3048
+
+        self.pos = GeoPos(lat, lon, alt)
+
     def __str__(self):
         return json.dumps(self.data, indent=4)
     
@@ -161,16 +168,11 @@ class AirportDBAirport:
     def icao_code(self) -> str:
         return self.data.get('icao_code', 'N/A')
     
-    def position(self) -> tuple:
-        return (float(self.data.get('latitude_deg', 0)), float(self.data.get('longitude_deg', 0)))
+    def position(self) -> GeoPos:
+        return self.pos
     
     def elevation(self, unit="ft") -> float:
-        if unit == "m":
-            return float(self.data.get('elevation_ft', 0)) * 0.3048
-        elif unit == "ft": 
-            return float(self.data.get('elevation_ft', 0))
-        else:
-            raise ValueError("Unsupported unit. Use 'ft' or 'm'.")
+        return self.pos.altitude(unit=unit)
         
     def country(self) -> str:
         if "country" in self.data and "name" in self.data['country']:
@@ -215,8 +217,10 @@ class AirportDBAirport:
         md += f"- **City**: {self.city()}\n"
         md += f"- **IATA Code**: {self.iata_code()}\n"
         md += f"- **ICAO Code**: {self.icao_code()}\n"
-        md += f"- **Position**: {self.position()[0]:.6f}, {self.position()[1]:.6f}\n"
-        md += f"- **Elevation**: {self.elevation():.0f} ft\n"
+        md += f"- **GeoPosition**: {self.pos:min} ({self.pos})\n"
+        elev_ft = f"{self.elevation(unit="ft"):_.0f}".replace("_", " ")
+        elev_m  = f"{self.elevation(unit="m" ):_.0f}".replace("_", " ")
+        md += f"- **Elevation**: {elev_ft} ft ({elev_m} m)\n"
 
         md += "## Runways:\n"
         for rw in self.runways:
@@ -236,13 +240,13 @@ class AirportDBAirport:
 
                 if meteo_france:
                     try:
-                        station, distance = meteo_france.get_closest_station(self.position()[0], self.position()[1])
+                        station, distance = meteo_france.get_closest_station(self.pos, unit="nm")
                         observation = meteo_france.get_observation_6m(station)
                         if distance < 2:
                             md += f"*Données Meteo France de la station à proximité*\n"
                             metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
                         else:
-                            md += f"*Données Meteo France de la station {station.name} à {distance/1.852:.1f} nm*\n"
+                            md += f"*Données Meteo France de la station {station.name} à {distance:.1f} nm*\n"
                             metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
                         md += f"```\n{metar_data}\n```\n"
 

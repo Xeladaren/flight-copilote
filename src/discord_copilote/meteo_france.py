@@ -5,41 +5,19 @@ import urllib.parse
 import json
 import datetime
 
+from .utils import GeoPos
+
 class MeteoFranceStation:
-    def __init__(self, geo_id_insee, name, latitude, longitude, altitude):
+    def __init__(self, geo_id_insee: str, name: str, latitude: float, longitude: float, altitude: float):
         self.geo_id_insee = geo_id_insee
         self.name = name
-        self.latitude = latitude
-        self.longitude = longitude
-        self.altitude = altitude
+        self.pos = GeoPos(latitude, longitude, altitude=altitude)
 
     def __str__(self):
         return f"{self.name} ({self.geo_id_insee}) - {self.latitude:.4f},{self.longitude:.4f} Alt {self.altitude}m"
     
-    def get_distance(self, latitude, longitude, unit="km"):
-        # Haversine formula to calculate distance between two lat/lon points in km
-        from math import radians, sin, cos, sqrt, atan2
-
-        R = 6371.0  # Earth radius in km
-
-        lat1 = radians(self.latitude)
-        lon1 = radians(self.longitude)
-        lat2 = radians(latitude)
-        lon2 = radians(longitude)
-
-        dlon = lon2 - lon1
-        dlat = lat2 - lat1
-
-        a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
-        c = 2 * atan2(sqrt(a), sqrt(1 - a))
-
-        distance = R * c
-        if unit == "m":
-            distance *= 1000
-        elif unit == "nm":
-            distance /= 1.852
-
-        return distance
+    def get_distance(self, other_pos: GeoPos, unit="nm"):
+        return self.pos.distance_to(other_pos, unit=unit)
 
 class MeteoFranceObservation:
     def __init__(self, data: dict, station: MeteoFranceStation = None):
@@ -201,13 +179,13 @@ class MeteoFrance:
 
         return self.stations
     
-    def get_closest_station(self, latitude, longitude):
+    def get_closest_station(self, pos: GeoPos, unit="nm") -> tuple[MeteoFranceStation, float]:
         stations = self.get_station_list()
         if not stations:
             return None, 0.0
 
-        closest_station = min(stations, key=lambda station: station.get_distance(latitude, longitude))
-        return closest_station, closest_station.get_distance(latitude, longitude, unit="km")
+        closest_station = min(stations, key=lambda station: station.get_distance(pos))
+        return closest_station, closest_station.get_distance(pos, unit=unit)
 
     def get_observation_6m(self, station: MeteoFranceStation) -> MeteoFranceObservation:
         

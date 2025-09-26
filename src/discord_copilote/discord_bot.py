@@ -57,13 +57,13 @@ class DiscordCopilote(discord.Client):
                 if self.meteo_france:
                     try:
                         airport = self.airport_db.get_airport(icao_code)
-                        station, distance = self.meteo_france.get_closest_station(airport.position()[0], airport.position()[1])
+                        station, distance = self.meteo_france.get_closest_station(airport.position(), unit="nm")
                         observation = self.meteo_france.get_observation_6m(station)
                         if distance < 2:
                             md = f"*Données Meteo France de la station à proximité de {airport.icao_code()}*\n"
                             metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
                         else:
-                            md = f"*Données Meteo France de la station {station.name} à {distance/1.852:.1f} nm de {airport.icao_code()}*\n"
+                            md = f"*Données Meteo France de la station {station.name} à {distance:.1f} nm de {airport.icao_code()}*\n"
                             metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
                         md += f"```\n{metar_data}\n```\n"
                         await args.channel.send(md)
