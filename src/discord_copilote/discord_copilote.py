@@ -5,6 +5,7 @@ import argparse
 from .airport_db import AirportDB
 from .discord_bot import DiscordCopilote
 from .meteo_france import MeteoFrance
+from .utils import Plane
 
 def main():
     print("Hello, Discord Copilote!")
@@ -19,13 +20,16 @@ def main():
     meteo_france = MeteoFrance(api_key=config["meteo-france"]["apikey"])
     airport_db = AirportDB(api_token=config["airport-db"]["apiToken"])
 
+    plane_list = []
+    if "planes" in config:
+        for plane_config in config["planes"]:
+            new_plane = Plane(plane_config)
+            plane_list.append(new_plane)
 
-    # airport = airport_db.get_airport("LFOU")
-    # print(airport)
-    # print(airport.to_markdown())
 
     client = DiscordCopilote()
     client.set_airport_db(airport_db)
     client.set_meteo_france(meteo_france)
+    client.set_planes(plane_list)
     client.run(config["discord"]["apikey"])
 

@@ -159,6 +159,9 @@ class AirportDBAirport:
     def __str__(self):
         return json.dumps(self.data, indent=4)
     
+    def name(self) -> str:
+        return self.data.get('name', 'Unknown Airport')
+    
     def city(self) -> str:
         return self.data.get('municipality', 'N/A')
     
@@ -197,6 +200,12 @@ class AirportDBAirport:
                 return float(self.data['station']['distance'])
         return 0.0
     
+    def distance_to(self, other: "AirportDBAirport", unit="nm") -> float:
+        return self.pos.distance_to(other.pos, unit=unit)
+    
+    def heading_to(self, other: "AirportDBAirport") -> float:
+        return self.pos.heading_to(other.pos)
+    
     def metar(self) -> str:
 
         station_icao = self.station_icao()
@@ -210,7 +219,7 @@ class AirportDBAirport:
             return None
     
     def to_markdown(self, meteo_france=None) -> str:
-        md = f"# {self.data.get('name', 'Unknown Airport')} ({self.icao_code()})\n"
+        md = f"# {self.name()} ({self.icao_code()})\n"
 
         md += f"- **Country**: {self.country()}\n"
         md += f"- **Region**: {self.region()}\n"

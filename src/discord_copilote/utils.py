@@ -112,3 +112,73 @@ class GeoPos:
         compass_bearing = (initial_bearing + 360) % 360
 
         return compass_bearing
+    
+class Plane:
+
+    def __init__(self, data):
+
+        self.id = data.get('id', 'N/A')
+        self.type = data.get('type', 'N/A')
+        self.cruse_speed = data.get('cruse-speed', None)
+        self.range = data.get('range', None)
+        self.hour_cost = data.get('hour-cost', None)
+        self.cost_unit = data.get('cost-unit', "¤")
+        self.seats = data.get('seats', None)
+
+    def __str__(self):
+        return f"{self.id}({self.type})"
+
+    def distance_time(self, distance):
+        """
+        Calcule the time to parcoure the given distance
+        """
+        if self.cruse_speed:
+            return distance / self.cruse_speed
+        else:
+            return None
+
+    def time_cost(self, time):
+        if self.hour_cost:
+            return self.hour_cost * time
+        else:
+            return None
+        
+    def distance_cost(self, distance):
+        
+        time = self.distance_time(distance)
+
+        if time:
+            return self.time_cost(time)
+        else:
+            return None
+        
+    def nav_md(self, distance):
+
+        md  = f"**{self.id}** (*{self.type}*): "
+
+        if self.cruse_speed:
+            md += f"Speed {self.cruse_speed:.0f} kts, "
+
+        time = self.distance_time(distance)
+        if time:
+            md += f"Time {time_str(time)}"
+            if self.range:
+                range_percent = int(( time / self.range ) * 100)
+                md += f" ({range_percent} % of range)"
+            md += ", "
+        
+        cost = self.distance_cost(distance)
+        if cost:
+            md += f"Cost {cost:.0f} {self.cost_unit}"
+            if self.seats:
+                md += f" ({cost/self.seats:.0f} {self.cost_unit}/seat)"
+
+        return md
+        
+def time_str(time: float) -> str:
+    """
+    Convertit un temps en heures (float) en une chaîne formatée HH:MM:SS.
+    """
+    time_hour = int(time)
+    time_min = int((time - time_hour) * 60)
+    return f"{time_hour:02d}:{time_min:02d}"

@@ -12,6 +12,7 @@ class DiscordCopilote(discord.Client):
         intents.message_content = True  # Nécessaire pour lire le contenu des messages
         self.airport_db = None
         self.meteo_france = None
+        self.plane_list = []
         super().__init__(intents=intents, **options)
 
     def set_airport_db(self, airport_db):
@@ -19,6 +20,9 @@ class DiscordCopilote(discord.Client):
 
     def set_meteo_france(self, meteo_france):
         self.meteo_france = meteo_france
+
+    def set_planes(self, plane_list):
+        self.plane_list = plane_list
 
     async def on_ready(self):
         print(f'Connecté en tant que {self.user}')
@@ -76,6 +80,42 @@ class DiscordCopilote(discord.Client):
                 if args.channel:
                     await args.channel.send(f"```\n{metar_data}\n```")
 
+    async def cmd_nav(self, args):
+        print(args)
+
+        try:
+            airport_departure = self.airport_db.get_airport(args.icao_departure)
+        except Exception as e:
+            print(f"Fail to get departure airport : {str(e)}")
+            if args.channel:
+                await args.channel.send(f"Fail to get departure airport {args.icao_departure}")
+            return
+
+        try:
+            airport_arrival = self.airport_db.get_airport(args.icao_arrival)
+        except Exception as e:
+            print(f"Fail to get arrival airport : {str(e)}")
+            if args.channel:
+                await args.channel.send(f"Fail to get arrival airport {args.icao_arrival}")
+            return
+        
+        md  = f"# Navigation {airport_departure.icao_code()} -> {airport_arrival.icao_code()}\n"
+        md += f"- **Departure**: {airport_departure.name()}, {airport_departure.region()}, {airport_departure.country()}\n"
+        md += f"- **Departure Position**: {airport_departure.position():min}\n"
+        md += f"- **Arrival**: {airport_arrival.name()}, {airport_arrival.region()}, {airport_arrival.country()}\n"
+        md += f"- **Arrival Position**: {airport_arrival.position():min}\n"
+        distance = airport_departure.distance_to(airport_arrival, unit="nm")
+        md += f"- **Distance**: {distance:.2f} nm\n"
+        md += f"- **Heading**: {airport_departure.heading_to(airport_arrival):.0f} °\n"
+
+        if len(self.plane_list) > 0:
+            md += f"## Planes\n"
+            for plane in self.plane_list:
+                md += f"- {plane.nav_md(distance)}\n"
+
+        if args.channel:
+            await args.channel.send(md)
+
     async def on_message(self, message):
         
         if message.author == self.user:
@@ -85,10 +125,12 @@ class DiscordCopilote(discord.Client):
         # if message.mentions:
         #     print(f'Mentions: {message.mentions}')
 
-        if self.user in message.mentions:
+        # print(message.channel, type(message.channel))
+
+        if self.user in message.mentions or type(message.channel) == discord.channel.DMChannel:
             message_str = message.content.replace(f'<@{self.user.id}>', '').strip()
 
-            parser = argparse.ArgumentParser(prog=f"<@{self.user.id}>", add_help=False)
+            parser = argparse.ArgumentParser(prog=f"<@{self.user.id}>", add_help=False, exit_on_error=False)
             parser.add_argument("--help", "-h", action="store_true", help="Show this help message and exit")
 
             subparsers = parser.add_subparsers(dest='command')
@@ -102,7 +144,19 @@ class DiscordCopilote(discord.Client):
             parser_metar.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
             parser_metar.set_defaults(channel=message.channel, func=self.cmd_metar, parser=parser_metar)
 
-            args = parser.parse_args(message_str.split())
+            parser_nav = subparsers.add_parser('nav', add_help=False, help='Get Nav information between to airport.')
+            parser_nav.add_argument('icao_departure', help='ICAO airport code of departure')
+            parser_nav.add_argument('icao_arrival', help='ICAO airport code of arrival')
+            parser_nav.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
+            parser_nav.set_defaults(channel=message.channel, func=self.cmd_nav, parser=parser_nav)
+            
+            try:
+                args = parser.parse_args(message_str.split())
+            except Exception as e:
+                if message.channel:
+                    await message.channel.send(str(e))
+                print(f"fail to parse cmd: {str(e)}")
+                return
 
             if args.help and args.command and hasattr(args, 'parser'):
 
