@@ -2,7 +2,7 @@
 import discord
 import argparse
 
-from .metar import metar_get
+from .metar import metar_get, metar_get_around
 
 
 class DiscordCopilote(discord.Client):
@@ -23,6 +23,49 @@ class DiscordCopilote(discord.Client):
 
     def set_planes(self, plane_list):
         self.plane_list = plane_list
+
+    def print_metar(self, icao_code):
+        md = ""
+        try:
+            metar_data = metar_get(icao_code)
+        except Exception as e:
+
+            try:
+                airport = self.airport_db.get_airport(icao_code, key="icao_code")
+            except Exception as e:
+                print(f"Fail to get airport : {str(e)}")
+                return None
+
+            try:
+                metar_around = metar_get_around(airport.position(), distance=100000, max_count=3)
+
+                if len(metar_around) > 0:
+                    md += f"*Pas de donnée METAR pour {icao_code}. Voici les données des stations proches:*\n"
+                    for metar_distance, metar_info in metar_around:
+                        md += f"*À {metar_distance/1000:.1f} km*\n"
+                        md += f"```\n{metar_info}\n```\n"
+            except Exception as e:
+                print(f"Fail to get aroud metars : {str(e)}")
+                return None
+
+            if self.meteo_france:
+                try:
+                    station, distance = self.meteo_france.get_closest_station(airport.position(), unit="nm")
+                    observation = self.meteo_france.get_observation_6m(station)
+                    if distance < 2:
+                        md += f"*Données Meteo France de la station à proximité de {airport.icao_code()}*\n"
+                        metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
+                    else:
+                        md += f"*Données Meteo France de la station {station.name} à {distance:.1f} nm de {airport.icao_code()}*\n"
+                        metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
+                    md += f"```\n{metar_data}\n```\n"
+                except Exception as e:
+                    print(f"Fail to get meteo france data : {str(e)}")
+        else:
+            md += f"```\n{metar_data}\n```\n"
+
+        return md
+        
 
     async def on_ready(self):
         print(f'Connecté en tant que {self.user}')
@@ -55,30 +98,14 @@ class DiscordCopilote(discord.Client):
             return
         for icao_code in args.icao_codes:
             icao_code = icao_code.upper()
-            try:
-                metar_data = metar_get(icao_code)
-            except Exception as e:
-                if self.meteo_france:
-                    try:
-                        airport = self.airport_db.get_airport(icao_code)
-                        station, distance = self.meteo_france.get_closest_station(airport.position(), unit="nm")
-                        observation = self.meteo_france.get_observation_6m(station)
-                        if distance < 2:
-                            md = f"*Données Meteo France de la station à proximité de {airport.icao_code()}*\n"
-                            metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
-                        else:
-                            md = f"*Données Meteo France de la station {station.name} à {distance:.1f} nm de {airport.icao_code()}*\n"
-                            metar_data = observation.to_metar(airport_oaci_code=airport.icao_code())
-                        md += f"```\n{metar_data}\n```\n"
-                        await args.channel.send(md)
-                    except Exception as e:
-                        print(str(e))
-                        await args.channel.send(f"Pas de donnée METAR pour {icao_code}")
-                elif args.channel:
-                    await args.channel.send(f"Pas de donnée METAR pour {icao_code}")
-            else:
-                if args.channel:
-                    await args.channel.send(f"```\n{metar_data}\n```")
+
+            metar_data = self.print_metar(icao_code)
+            if metar_data:
+                md = "## METAR pour " + icao_code + "\n"
+                md += metar_data
+                if md and args.channel:
+                    await args.channel.send(md)
+            
 
     async def cmd_nav(self, args):
         print(args)

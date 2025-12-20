@@ -14,7 +14,7 @@ class MeteoFranceStation:
         self.pos = GeoPos(latitude, longitude, altitude=altitude)
 
     def __str__(self):
-        return f"{self.name} ({self.geo_id_insee}) - {self.latitude:.4f},{self.longitude:.4f} Alt {self.altitude}m"
+        return f"{self.name} ({self.geo_id_insee}) - {self.pos.latitude():.4f},{self.pos.longitude():.4f} Alt {self.pos.altitude()}m"
     
     def get_distance(self, other_pos: GeoPos, unit="nm"):
         return self.pos.distance_to(other_pos, unit=unit)
