@@ -2,6 +2,10 @@
 import http.client
 import json
 import urllib.parse
+import re
+import datetime
+import sys
+import time
 
 from .metar import metar_get
 from .utils import GeoPos
@@ -206,18 +210,6 @@ class AirportDBAirport:
     def heading_to(self, other: "AirportDBAirport") -> float:
         return self.pos.heading_to(other.pos)
     
-    def metar(self) -> str:
-
-        station_icao = self.station_icao()
-        if not station_icao:
-            return None
-
-        try:
-            return metar_get(station_icao)
-        except Exception as e:
-            print(f"Error fetching METAR data for {station_icao}: {str(e)}")
-            return None
-    
     def to_markdown(self, meteo_france=None) -> str:
         md = f"# {self.name()} ({self.icao_code()})\n"
 
@@ -239,58 +231,144 @@ class AirportDBAirport:
         for freq in self.freqs:
             md += freq.to_markdown(indent=1)
 
-        metar_data = self.metar()
-    
-        if metar_data:
-            md += "## METAR:\n"
-            if self.station_distance() > 0:
-                md += f"*Donnée METAR de la station {self.station_icao()} à {self.station_distance():.1f} nm*\n"
-                md += f"```\n{metar_data}\n```\n"
-
-                if meteo_france:
-                    try:
-                        station, distance = meteo_france.get_closest_station(self.pos, unit="nm")
-                        observation = meteo_france.get_observation_6m(station)
-                        if distance < 2:
-                            md += f"*Données Meteo France de la station à proximité*\n"
-                            metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
-                        else:
-                            md += f"*Données Meteo France de la station {station.name} à {distance:.1f} nm*\n"
-                            metar_data = observation.to_metar(airport_oaci_code=self.icao_code())
-                        md += f"```\n{metar_data}\n```\n"
-
-                    except Exception as e:
-                        print(f"Fail to get Meteo France Station Info : {str(e)}")
-
-            else:
-                md += f"```\n{metar_data}\n```\n"
         return md
+
 
 class AirportDB:
     
     def __init__(self, api_token: str):
         self.api_token = api_token
+        self._last_update = None
+        self._airports = []
+        self._runways = []
+        self._frequencies = []
+        self._navaids = []
+        self._countries = []
+        self._regions = []
 
-    def get_airport(self, icao_airport_code: str) -> AirportDBAirport:
+    def _decode_line(self, line):
+        line_out = []
 
-        host = "airportdb.io"
-        path = f"/api/v1/airport/{icao_airport_code.upper()}"
+        for elem in line:
+            if '"' in elem:
+                line_out.append(elem.replace('"', ''))
+            elif elem.isdecimal():
+                line_out.append(int(elem))
+            elif re.match(r"[+-]?\d*\.\d+", elem):
+                line_out.append(float(elem))
+            elif elem == "":
+                line_out.append(None)
+            else:
+                line_out.append(elem)
+                
+        return line_out
+    
+    def _update_db(self, force=False):
+        need_update = force
 
-        querry = {"apiToken": self.api_token}
+        if not need_update:
+            if self._last_update is None:
+                need_update = True
+            elif datetime.datetime.now() - self._last_update > datetime.timedelta(days=1):
+                need_update = True
+        
+        if need_update:
 
-        url = urllib.parse.urlunparse(("", "", path, "", urllib.parse.urlencode(querry), ""))
+            self._last_update = datetime.datetime.now()
+
+            print(f"[{time.time():.3f}] Start update")
+
+            self._airports    = self._update_csv(self._airports,    "Airports",    "/ourairports-data/airports.csv")
+            self._runways     = self._update_csv(self._runways,     "Runways",     "/ourairports-data/runways.csv")
+            self._frequencies = self._update_csv(self._frequencies, "Frequencies", "/ourairports-data/airport-frequencies.csv")
+            self._navaids     = self._update_csv(self._navaids,     "Navaids",     "/ourairports-data/navaids.csv")
+            self._countries   = self._update_csv(self._countries,   "Countries",   "/ourairports-data/countries.csv")
+            self._regions     = self._update_csv(self._regions,     "Regions",   "/ourairports-data/regions.csv")
+
+            print(f"[{time.time():.3f}] OK")
+
+    def _update_csv(self, old_database, database_name, database_path):
+        try:
+            database = self._get_csv(database_path)
+        except Exception as e:
+            print(f"Fail to get {database_name} database: {str(e)}")
+            return old_database
+        else:
+            print(f"[{time.time():.3f}] {database_name} update OK")
+            return database
+
+    def _get_csv(self, path):
+
+        host = "davidmegginson.github.io"
+
+        url = urllib.parse.urlunparse(("", "", path, "", "", ""))
 
         connect = http.client.HTTPSConnection(host)
         connect.request("GET", url)
         response = connect.getresponse()
+        raw_data = response.read().decode()
+        data_line = raw_data.split("\n")
 
-        if response.status != 200:
-            raise Exception(f"Error fetching airport data: {response.status} {response.reason}")
+        csv_data = []
 
-        data = json.loads(response.read().decode())
-        airport = AirportDBAirport(data)
-        connect.close()
+        if len(data_line) > 1:
+            headers = self._decode_line(data_line[0].split(","))
 
-        # Placeholder for actual API call
-        return airport
+            for line in data_line[1:]:
+                datas = self._decode_line(line.split(","))
+
+                new_elem = {}
+                for header, data in zip(headers, datas):
+                    new_elem[header] = data
+
+                if len(new_elem) == len(headers):
+                    csv_data.append(new_elem)
+
+        return csv_data
+
+    def get_airport(self, value, key='id'):
+        
+        self._update_db()
+
+        out_airport = None
+
+        for airport in self._airports:
+            if key in airport and type(airport[key]) == str and value.upper() == airport[key].upper():
+                out_airport = airport.copy()
+                id = out_airport['id']
+                break
+
+        print(f"Searching airport with {key}={value} -> Found: {out_airport is not None}")
+        if not out_airport:
+            raise Exception(f"Airport with {key}={value} not found")
+
+        if out_airport:
+            for runway in self._runways:
+                if runway["airport_ref"] == id:
+                    if not "runways" in out_airport:
+                        out_airport["runways"] = []
+                    out_airport["runways"].append(runway)
+                    print(f"  Added runway {runway['le_ident']}/{runway['he_ident']}")
+
+            for frequencie in self._frequencies:
+                if frequencie["airport_ref"] == id:
+                    if not "freqs" in out_airport:
+                        out_airport["freqs"] = []
+                    out_airport["freqs"].append(frequencie)
+
+            for country in self._countries:
+                if country['code'] == out_airport['iso_country']:
+                    if not "country" in out_airport:
+                        out_airport["country"] = country
+                        break
+            
+            for region in self._regions:
+                if region['code'] == out_airport['iso_region']:
+                    if not "region" in out_airport:
+                        out_airport["region"] = region
+                        break
+
+
+        return AirportDBAirport(out_airport)
+
     

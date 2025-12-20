@@ -37,7 +37,7 @@ class DiscordCopilote(discord.Client):
         for icao_code in args.icao_codes:
             icao_code = icao_code.upper()
             try:
-                airport = self.airport_db.get_airport(icao_code)
+                airport = self.airport_db.get_airport(icao_code, key="icao_code")
                 # print(airport)
             except Exception as e:
                 if args.channel:
@@ -84,7 +84,7 @@ class DiscordCopilote(discord.Client):
         print(args)
 
         try:
-            airport_departure = self.airport_db.get_airport(args.icao_departure)
+            airport_departure = self.airport_db.get_airport(args.icao_departure, key="icao_code")
         except Exception as e:
             print(f"Fail to get departure airport : {str(e)}")
             if args.channel:
@@ -92,7 +92,7 @@ class DiscordCopilote(discord.Client):
             return
 
         try:
-            airport_arrival = self.airport_db.get_airport(args.icao_arrival)
+            airport_arrival = self.airport_db.get_airport(args.icao_arrival, key="icao_code")
         except Exception as e:
             print(f"Fail to get arrival airport : {str(e)}")
             if args.channel:
