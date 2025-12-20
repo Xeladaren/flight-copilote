@@ -4,6 +4,7 @@ import http.client
 import urllib.parse
 import json
 import datetime
+import math
 
 from .utils import GeoPos
 
@@ -26,6 +27,122 @@ class MeteoFranceObservation:
 
     def __str__(self):
         return json.dumps(self.data, indent=4, default=str)
+    
+    def to_markdown(self) -> str:
+
+        md = ""
+
+        if self.data["pmer"] is not None:
+            qnh_hpa = int(round(self.data["pmer"] / 100))
+            md += f"- **QNH**: {qnh_hpa} hPa\n"
+
+        if self.data["t"] is not None:
+            t_c = int(round(self.data["t"] - 273.15))
+            md += f"- **Temperature**: {t_c}°C\n"
+
+        if self.data["td"] is not None:
+            td_c = int(round(self.data["td"] - 273.15))
+            md += f"- **Dew Point**: {td_c}°C\n"
+
+        if self.data["u"] is not None:
+            humidity = int(round(self.data["u"]))
+            md += f"- **Humidity**: {humidity}%\n"
+
+        if self.data["ff"] is not None:
+            ff_kts = int(round(self.data["ff"] * (3600 / 1852)))
+            md += f"- **Wind**: {ff_kts} kts"
+            if self.data["dd"] is not None:
+                dd = int(self.data["dd"])
+                md += f" {dd}°"
+            md += "\n"
+
+        if self.data["fxi10"] is not None:
+            fxi10_kts = int(round(self.data["fxi10"] * (3600 / 1852)))
+            md += f"- **Gusts**: {fxi10_kts} kts"
+            if self.data["dxi10"] is not None:
+                dxi10 = int(self.data["dxi10"])
+                md += f" {dxi10}°"
+            md += "\n"
+
+        if self.data["rr_per"] is not None:
+            rrr_1h = self.data["rr_per"] * 10
+            md += f"- **Precipitation**: {rrr_1h} mm/h\n"
+
+        if self.data["vv"] is not None:
+            md += f"- **Visibility**: {int(self.data['vv'])/1000:.2f} km\n"
+
+        return md
+
+    def preferred_runway(self, runways: list[int]) -> int:
+        """
+        Determine the preferred runway based on the current wind conditions.
+        
+        :param runways: A list of runway headings in degrees
+        :type runways: list[int]
+        :return: The preferred runway heading
+        :rtype: int
+        """
+
+        if self.data['ff'] is None or self.data['dd'] is None:
+            return runways[0]
+
+        ff_kts = int(round(self.data['ff'] * (3600 / 1852)))
+        dd = int(self.data['dd'])
+
+        best_runway = runways[0]
+        best_headwind = -9999
+
+        best_index = 0
+        index = 0
+
+        for runway in runways:
+            wind_angle = (dd - runway + 360) % 360
+            if wind_angle > 180:
+                wind_angle -= 360
+
+            headwind = int(round(ff_kts * math.cos(math.radians(wind_angle))))
+
+            if headwind > best_headwind:
+                best_headwind = headwind
+                best_runway = runway
+                best_index = index
+
+            index += 1
+
+        return best_index, best_runway
+
+    def runway_wind(self, runway_heading: int) -> tuple[int, int]:
+        """
+        Calculate the lateral wind component for a given runway heading.
+        
+        :param runway_heading: The runway heading in degrees
+        :type runway_heading: int
+        :return: A tuple containing the front wind component in kts, the lateral wind component in kts and the wind direction relative to the runway (left/right)
+        :rtype: tuple[int, int, str]
+        """
+
+        if self.data['ff'] is None or self.data['dd'] is None:
+            return 0, "N/A"
+
+        ff_kts = int(round(self.data['ff'] * (3600 / 1852)))
+        dd = int(self.data['dd'])
+
+        wind_angle = (dd - runway_heading + 360) % 360
+
+        if wind_angle > 180:
+            wind_angle -= 360
+
+        lateral_wind = int(round(ff_kts * abs(math.sin(math.radians(wind_angle)))))
+        front_wind = int(round(ff_kts * math.cos(math.radians(wind_angle))))
+
+        if wind_angle < 0:
+            direction = "left"
+        elif wind_angle > 0:
+            direction = "right"
+        else:
+            direction = "headwind"
+
+        return front_wind, lateral_wind, direction
     
     def to_metar(self, airport_oaci_code: str = None) -> str:
 

@@ -1,6 +1,7 @@
 
 import discord
 import argparse
+import io
 
 from .metar import metar_get, metar_get_around
 
@@ -12,6 +13,7 @@ class DiscordCopilote(discord.Client):
         intents.message_content = True  # Nécessaire pour lire le contenu des messages
         self.airport_db = None
         self.meteo_france = None
+        self.aeroweb = None
         self.plane_list = []
         super().__init__(intents=intents, **options)
 
@@ -20,6 +22,9 @@ class DiscordCopilote(discord.Client):
 
     def set_meteo_france(self, meteo_france):
         self.meteo_france = meteo_france
+
+    def set_aeroweb(self, aeroweb):
+        self.aeroweb = aeroweb
 
     def set_planes(self, plane_list):
         self.plane_list = plane_list
@@ -143,6 +148,97 @@ class DiscordCopilote(discord.Client):
         if args.channel:
             await args.channel.send(md)
 
+    async def cmd_meteo(self, args):
+        print(args)
+
+        try:
+            airport = self.airport_db.get_airport(args.icao_code.upper(), key="icao_code")
+        except Exception as e:
+            print(f"Fail to get airport : {str(e)}")
+            if args.channel:
+                await args.channel.send(f"Fail to get airport {args.icao_code}")
+            return
+
+        if self.meteo_france:
+            try:
+                station, distance = self.meteo_france.get_closest_station(airport.position(), unit="nm")
+                observation = self.meteo_france.get_observation_6m(station)
+            except Exception as e:
+                print(f"Fail to get meteo for airport {args.icao_code} : {str(e)}")
+                if args.channel:
+                    await args.channel.send(f"Fail to get meteo for airport {args.icao_code}")
+                return
+            
+            md  = f"# Météo pour {airport.icao_code()} - {airport.name()}\n"
+            md +=  "## Données Meteo France\n"
+            md += f"- **Station**: {station}\n"
+            md += f"- **Distance**: {distance:.2f} nm\n"
+            md += observation.to_markdown()
+
+            runway_heading_list = []
+            runway_ident_list = []
+            for runway in airport.runways:
+                runway_heading_list.append(runway.le_heading())
+                runway_ident_list.append(runway.le_ident())
+                runway_heading_list.append(runway.he_heading())
+                runway_ident_list.append(runway.he_ident())
+
+            pref_index, pref_head = observation.preferred_runway(runway_heading_list)
+            pref_runway = runway_ident_list[pref_index]
+
+            md += f"- **Piste préférée**: {pref_runway}\n"
+
+            front_wind, lateral_wind, direction = observation.runway_wind(pref_head)
+
+            md += f"- **Vent dans l'axe**: {front_wind} kts {'de face' if front_wind >=0 else 'arrière'}\n"
+            md += f"- **Vent latéral**: {lateral_wind} kts {'à droite' if direction == 'right' else 'à gauche'}\n"
+
+            md += "## METAR\n"
+            md += self.print_metar(airport.icao_code())
+
+            if args.channel:
+                await args.channel.send(md)
+
+
+        if self.aeroweb:
+            
+            try:
+                self.aeroweb.login()
+                date = self.aeroweb.get_last_date()
+            except Exception as e:
+                print(f"Fail to login to AeroWeb: {str(e)}")
+                return
+
+            try:
+                date = self.aeroweb.get_last_date()
+                temsi_data = self.aeroweb.get_temsi(date, place="fr/france")
+                temsi_filename = f"temsi_{airport.icao_code()}_{date.strftime('%Y%m%d%H%M%S')}.png"
+                temsi_data_io = io.BytesIO(temsi_data)
+
+                discord_file = discord.File(fp=temsi_data_io, filename=temsi_filename)
+
+                if args.channel:
+                    await args.channel.send("## Carte TEMSI", file=discord_file)
+
+            except Exception as e:
+                print(f"Fail to get TEMSI image: {str(e)}")
+
+            try:
+                wintem_data = self.aeroweb.get_wintem(date, place="fr/france", level="fl020")
+                wintem_filename = f"wintem_fl020_{airport.icao_code()}_{date.strftime('%Y%m%d%H%M%S')}.png"
+                wintem_data_io = io.BytesIO(wintem_data)
+
+                discord_file = discord.File(fp=wintem_data_io, filename=wintem_filename)
+
+                if args.channel:
+                    await args.channel.send("## Carte WINTEM FL020", file=discord_file)
+            except Exception as e:
+                print(f"Fail to get WINTEM image: {str(e)}")
+
+            self.aeroweb.logout()
+
+
+
     async def on_message(self, message):
         
         if message.author == self.user:
@@ -170,6 +266,11 @@ class DiscordCopilote(discord.Client):
             parser_metar.add_argument('icao_codes', nargs='*', help='List of ICAO airport codes')
             parser_metar.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
             parser_metar.set_defaults(channel=message.channel, func=self.cmd_metar, parser=parser_metar)
+            
+            parser_meteo = subparsers.add_parser('meteo', add_help=False, help='Get Meteo information')
+            parser_meteo.add_argument('icao_code', help='ICAO airport code')
+            parser_meteo.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
+            parser_meteo.set_defaults(channel=message.channel, func=self.cmd_meteo, parser=parser_meteo)
 
             parser_nav = subparsers.add_parser('nav', add_help=False, help='Get Nav information between to airport.')
             parser_nav.add_argument('icao_departure', help='ICAO airport code of departure')
